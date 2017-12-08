@@ -53,11 +53,13 @@ static void syscall_handler(struct intr_frame *);
 
 static void write_handler(struct intr_frame *);
 static void exit_handler(struct intr_frame *);
+static void create_handler(struct intr_frame *);
 
 void
 syscall_init (void)
 {
-  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+//    lock_init(&lock);
+    intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
 static void
@@ -74,18 +76,21 @@ syscall_handler(struct intr_frame *f)
   thread_current()->current_esp = f->esp;
 
   switch (syscall) {
-  case SYS_HALT: 
-    shutdown_power_off();
-    break;
+    case SYS_HALT: 
+        shutdown_power_off();
+        break;
 
-  case SYS_EXIT: 
-    exit_handler(f);
-    break;
+    case SYS_EXIT: 
+        exit_handler(f);
+        break;
       
-  case SYS_WRITE: 
-    write_handler(f);
-    break;
-
+    case SYS_WRITE: 
+        write_handler(f);
+        break;
+    case SYS_CREATE:
+        create_handler(f);
+        break;
+        
   default:
     printf("[ERROR] system call %d is unimplemented!\n", syscall);
     thread_exit();
@@ -146,3 +151,18 @@ static void write_handler(struct intr_frame *f)
     f->eax = sys_write(fd, buffer, size);
 }
 
+static uint32_t sys_create(const char *file, unsigned size){
+//    printf("file: %s\n", *file);
+    bool success = filesys_create(file, size, false);
+    return success;
+}
+
+static void create_handler(struct intr_frame *f){
+    const char *file;
+    unsigned size;
+    
+    umem_read(f->esp + 4, &file, sizeof(file));
+    umem_read(f->esp + 8, &size, sizeof(size));
+    
+    f->eax = sys_create(file, size);
+}
