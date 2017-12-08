@@ -48,17 +48,23 @@
 #include "userprog/syscall.h"
 #include "userprog/process.h"
 #include "userprog/umem.h"
+#include "userprog/bgliu.h"
+#include "threads/lock.h"
 
 static void syscall_handler(struct intr_frame *);
 
 static void write_handler(struct intr_frame *);
 static void exit_handler(struct intr_frame *);
+
 static void create_handler(struct intr_frame *);
+static void open_handler(struct intr_frame *);
+
+struct lock lock;
 
 void
 syscall_init (void)
 {
-//    lock_init(&lock);
+    lock_init(&lock);
     intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -90,7 +96,12 @@ syscall_handler(struct intr_frame *f)
     case SYS_CREATE:
         create_handler(f);
         break;
-        
+    case SYS_OPEN:
+        open_handler(f);
+        break;
+    case SYS_READ:
+        read_handler(f);
+        break;
   default:
     printf("[ERROR] system call %d is unimplemented!\n", syscall);
     thread_exit();
@@ -152,8 +163,9 @@ static void write_handler(struct intr_frame *f)
 }
 
 static uint32_t sys_create(const char *file, unsigned size){
-//    printf("file: %s\n", *file);
+    lock_acquire(&lock);
     bool success = filesys_create(file, size, false);
+    lock_release(&lock);
     return success;
 }
 
@@ -165,4 +177,64 @@ static void create_handler(struct intr_frame *f){
     umem_read(f->esp + 8, &size, sizeof(size));
     
     f->eax = sys_create(file, size);
+}
+
+int sys_open(char *filename){
+    struct file_info *f = palloc_get_page(0);
+    lock_acquire(&lock);
+    struct file *file = filesys_open(filename);
+    if (file == NULL){
+        lock_release(&lock);
+        return -1;
+    }
+    f->file_name = file;
+    f->id = thread_current()->open_files + 3;
+//    printf("file id: %d\n", f->id);
+    thread_current()->open_files++;
+    list_push_back(&thread_current()->file_list, &f->elem);
+    lock_release(&lock);
+    
+    return f->id;
+}
+
+static void open_handler(struct intr_frame *f){
+    char *file;
+    umem_read(f->esp + 4, &file, sizeof(file));
+    f->eax = sys_open(file);
+}
+
+int sys_read(int file_id, void *buffer, int size){
+    lock_acquire(&lock);
+    struct file_info *f;
+    if (list_empty(&thread_current()->file_list)){
+        lock_release(&lock);
+    }
+    else{
+        for (struct list_elem *curr = list_front(&thread_current()->file_list); 
+            curr != list_end(&thread_current()->file_list); curr = list_next(curr)){
+            struct file_info *curr_file = list_entry(curr, struct file_info, elem);
+            if (curr_file->id == file_id){
+                f = curr_file;
+                break;
+            }
+        }
+        if (f == NULL){
+            lock_release(&lock);
+            return -1;
+        }
+    }
+    lock_release(&lock);
+    return file_read(f->file_name, buffer, size);
+}
+
+int read_handler(struct intr_frame *f){
+    int file_id;
+    void *buffer;
+    int size;
+    
+    umem_read(f->esp + 4, &file_id, sizeof(file_id));
+    umem_read(f->esp + 8, &buffer, sizeof(buffer));
+    umem_read(f->esp + 12, &size, sizeof(size));
+    
+    f->eax = sys_read(file_id, buffer, size);
 }

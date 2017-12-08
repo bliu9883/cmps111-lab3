@@ -164,7 +164,7 @@ process_execute(const char *cmdline)
     // Create a Kernel Thread for the new process
     tid = thread_create(filename, PRI_DEFAULT, start_process, cmdline_copy);
 
-    timer_msleep(10);
+    timer_msleep(200);
 
     return tid;
 }
