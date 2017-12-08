@@ -60,7 +60,7 @@
 // CMPS111 Lab 3 : Remove the comment on this literal when you are 
 // ready to start testing command line arguments
 // *****************************************************************
-//#define COMMAND_ARGUMENTS
+#define COMMAND_ARGUMENTS
 
 static thread_func start_process NO_RETURN;
 static bool load(const char *cmdline, void (**eip) (void), void **esp);
@@ -73,11 +73,45 @@ static bool load(const char *cmdline, void (**eip) (void), void **esp);
 static void
 push_command(const char *cmdline UNUSED, void **esp)
 {
-    printf("Base Address: 0x%08x\n", *esp);
-
+//    printf("Base Address: 0x%08x\n", *esp);
+    int argc = 0;
+    char* token;
+    char* save_ptr;
+    char **split_cmdline = malloc(2*sizeof(char *));;
+    for (token = strtok_r(cmdline, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+    {
+        split_cmdline[argc] = token;
+        argc++;
+    }
+    
+    void *argv_addr[argc];
+    for (int i=0; i< argc; i++) 
+    {
+        int len = strlen(cmdline) + 1;
+        *esp -=len;
+        memcpy(*esp, split_cmdline[i], len);
+        argv_addr[i] = *esp;
+    }
     // Word align with the stack pointer. DO NOT REMOVE THIS LINE.
     *esp = (void*) ((unsigned int) (*esp) & 0xfffffffc);
-
+    // puts everything to pointer
+    *esp -= 4;
+    *((uint32_t*) *esp) = 0;
+    
+    for (int i = argc - 1; i>= 0; i--)
+    {
+        *esp -= 4;
+        *((void **) *esp) = argv_addr[i];
+    }
+    
+    *esp -= 4;
+    *((void**) *esp) = (*esp + 4);
+    
+    *esp -= 4;
+    *((int*) *esp) = argc;
+    
+    *esp -= 4;
+    *((int*) *esp) = 0;
     // Some of you CMPS111 Lab 3 code will go here.
     //
     // One approach is to immediately call a function you've created in a
@@ -124,9 +158,11 @@ process_execute(const char *cmdline)
         return TID_ERROR;
     
     strlcpy(cmdline_copy, cmdline, PGSIZE);
-
+    
+    char *save_ptr;
+    char *filename = strtok_r(cmdline, " ", &save_ptr);
     // Create a Kernel Thread for the new process
-    tid = thread_create(cmdline, PRI_DEFAULT, start_process, cmdline_copy);
+    tid = thread_create(filename, PRI_DEFAULT, start_process, cmdline_copy);
 
     timer_msleep(10);
 
@@ -142,16 +178,26 @@ static void
 start_process(void *cmdline)
 {
     bool success = false;
-
     // Initialize interrupt frame and load executable. 
     struct intr_frame pif;
     memset(&pif, 0, sizeof pif);
     pif.gs = pif.fs = pif.es = pif.ds = pif.ss = SEL_UDSEG;
     pif.cs = SEL_UCSEG;
     pif.eflags = FLAG_IF | FLAG_MBS;
-    success = load(cmdline, &pif.eip, &pif.esp);
+    
+
+    char *cmdline_temp = palloc_get_page(0);
+    if (cmdline == NULL){
+        return TID_ERROR;
+    }
+    strlcpy(cmdline_temp, cmdline, PGSIZE);
+    
+    char *save_ptr;
+    char *filename = strtok_r(cmdline, " ", &save_ptr);
+    
+    success = load(filename, &pif.eip, &pif.esp);
     if (success) {
-        push_command(cmdline, &pif.esp);
+        push_command(cmdline_temp, &pif.esp);
     }
     palloc_free_page(cmdline);
 
