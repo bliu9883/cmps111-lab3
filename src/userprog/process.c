@@ -71,13 +71,14 @@ static bool load(const char *cmdline, void (**eip) (void), void **esp);
  * format binary has been loaded into the heap by load();
  */
 static void
-push_command(const char *cmdline UNUSED, void **esp)
+push_command(char *cmdline UNUSED, void **esp)
 {
-//    printf("Base Address: 0x%08x\n", *esp);
     int argc = 0;
     char* token;
     char* save_ptr;
     char **split_cmdline = malloc(2*sizeof(char *));;
+    
+    //split command line into individual arguments
     for (token = strtok_r(cmdline, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
     {
         split_cmdline[argc] = token;
@@ -85,6 +86,8 @@ push_command(const char *cmdline UNUSED, void **esp)
     }
     
     void *argv_addr[argc];
+    
+    //populate stack from left to right
     for (int i=0; i< argc; i++) 
     {
         int len = strlen(cmdline) + 1;
@@ -92,24 +95,30 @@ push_command(const char *cmdline UNUSED, void **esp)
         memcpy(*esp, split_cmdline[i], len);
         argv_addr[i] = *esp;
     }
+    
     // Word align with the stack pointer. DO NOT REMOVE THIS LINE.
     *esp = (void*) ((unsigned int) (*esp) & 0xfffffffc);
-    // puts everything to pointer
+    
+    // add end null to stack
     *esp -= 4;
     *((uint32_t*) *esp) = 0;
     
+    // add addresses of args
     for (int i = argc - 1; i>= 0; i--)
     {
         *esp -= 4;
         *((void **) *esp) = argv_addr[i];
     }
     
+    // add address of argv start
     *esp -= 4;
     *((void**) *esp) = (*esp + 4);
     
+    // add argc to stackad
     *esp -= 4;
     *((int*) *esp) = argc;
     
+    // fake address
     *esp -= 4;
     *((int*) *esp) = 0;
     // Some of you CMPS111 Lab 3 code will go here.
@@ -139,7 +148,7 @@ push_command(const char *cmdline UNUSED, void **esp)
  * could not be created. 
  */
 tid_t
-process_execute(const char *cmdline)
+process_execute(char *cmdline)
 {
 #ifndef COMMAND_ARGUMENTS
     char space[] = " ";
@@ -187,9 +196,6 @@ start_process(void *cmdline)
     
 
     char *cmdline_temp = palloc_get_page(0);
-    if (cmdline == NULL){
-        return TID_ERROR;
-    }
     strlcpy(cmdline_temp, cmdline, PGSIZE);
     
     char *save_ptr;
