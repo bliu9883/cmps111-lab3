@@ -146,17 +146,41 @@ static void exit_handler(struct intr_frame *f)
  */
 static uint32_t sys_write(int fd, const void *buffer, unsigned size)
 {
-  umem_check((const uint8_t*) buffer);
-  umem_check((const uint8_t*) buffer + size - 1);
+    umem_check((const uint8_t*) buffer);
+    umem_check((const uint8_t*) buffer + size - 1);
 
-  int ret = -1;
-
-  if (fd == 1) { // write to stdout
-    putbuf(buffer, size);
-    ret = size;
+    int ret = -1;
+    
+    if (fd == 1) { // write to stdout
+      putbuf(buffer, size);
+      ret = size;
+    }
+    lock_acquire(&lock);
+    struct file_info *fi = NULL;
+    if(!list_empty(&thread_current()->file_list)){
+        for(struct list_elem *curr = list_front(&thread_current()->file_list); 
+        curr != list_end(&thread_current()->file_list);
+        curr = list_next(curr)){
+            struct file_info *curr_info = list_entry(curr, struct file_info, elem);
+            if(curr_info->id == fd){
+                fi = curr_info;
+                break;
+            }
+        }
+        if(fi == NULL){
+            lock_release(&lock);
+            return -1;
+        } 
+    }else{
+      lock_release(&lock);
+      return -1;
   }
 
-  return (uint32_t) ret;
+  ret = file_write(fi->file_name, buffer, size);
+  lock_release(&lock);
+
+return (uint32_t) ret;
+    return (uint32_t) ret;
 }
 
 static void write_handler(struct intr_frame *f)
@@ -183,7 +207,7 @@ static void create_handler(struct intr_frame *f){
     const char *file;
     unsigned size;
     
-    umem_read(f->esp + 4, &file, sizeof(file));
+    umem_read(f->esp + 4, &file, sizeof(file));     
     umem_read(f->esp + 8, &size, sizeof(size));
     
     f->eax = sys_create(file, size);
