@@ -58,6 +58,10 @@ static void exit_handler(struct intr_frame *);
 
 static void create_handler(struct intr_frame *);
 static void open_handler(struct intr_frame *);
+static void read_handler(struct intr_frame *);
+static void file_size_handler(struct intr_frame *);
+static void close_handler(struct intr_frame *);
+
 
 struct lock lock;
 
@@ -101,6 +105,12 @@ syscall_handler(struct intr_frame *f)
         break;
     case SYS_READ:
         read_handler(f);
+        break;
+    case SYS_FILESIZE:
+        file_size_handler(f);
+        break;
+    case SYS_CLOSE:
+        close_handler(f);
         break;
   default:
     printf("[ERROR] system call %d is unimplemented!\n", syscall);
@@ -227,7 +237,7 @@ int sys_read(int file_id, void *buffer, int size){
     return file_read(f->file_name, buffer, size);
 }
 
-int read_handler(struct intr_frame *f){
+static void read_handler(struct intr_frame *f){
     int file_id;
     void *buffer;
     int size;
@@ -237,4 +247,70 @@ int read_handler(struct intr_frame *f){
     umem_read(f->esp + 12, &size, sizeof(size));
     
     f->eax = sys_read(file_id, buffer, size);
+}
+
+int sys_file_size(int file_id){
+    lock_acquire(&lock);
+    struct file_info *f;
+    if (list_empty(&thread_current()->file_list)){
+        lock_release(&lock);
+    }
+    else{
+        for (struct list_elem *curr = list_front(&thread_current()->file_list); 
+            curr != list_end(&thread_current()->file_list); curr = list_next(curr)){
+            struct file_info *curr_file = list_entry(curr, struct file_info, elem);
+            if (curr_file->id == file_id){
+                f = curr_file;
+                break;
+            }
+        }
+        if (f == NULL){
+            lock_release(&lock);
+            return -1;
+        }
+    }
+    int ret = file_length(f->file_name);
+    lock_release(&lock);
+    return ret;
+}
+
+static void file_size_handler(struct intr_frame *f){
+    int file_id;
+    
+    umem_read(f->esp + 4, &file_id, sizeof(file_id));
+    
+    f->eax = sys_file_size(file_id);
+}
+
+void sys_close(int file_id){
+    lock_acquire(&lock);
+    struct file_info *f;
+    if (list_empty(&thread_current()->file_list)){
+        lock_release(&lock);
+    }
+    else{
+        for (struct list_elem *curr = list_front(&thread_current()->file_list); 
+            curr != list_end(&thread_current()->file_list); curr = list_next(curr)){
+            struct file_info *curr_file = list_entry(curr, struct file_info, elem);
+            if (curr_file->id == file_id){
+                f = curr_file;
+                break;
+            }
+        }
+        if (f == NULL){
+            lock_release(&lock);
+            return -1;
+        }
+    }
+    file_close(f->file_name);
+    list_remove(&f->elem);
+    lock_release(&lock);
+}
+
+static void close_handler(struct intr_frame *f){
+    int file_id;
+    
+    umem_read(f->esp + 4, &file_id, sizeof(file_id));
+    
+    sys_close(file_id);
 }
